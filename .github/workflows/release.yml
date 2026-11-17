@@ -1,0 +1,51 @@
+name: release
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - id: tag
+        run: |
+          tag=$(date -u +%Y.%m.%d)
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >>"$GITHUB_OUTPUT"
+          fi
+      - if: steps.tag.outputs.exists != 'true'
+        uses: actions/checkout@v7
+      - if: steps.tag.outputs.exists != 'true'
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - if: steps.tag.outputs.exists != 'true'
+        run: ./build.sh "${{ steps.tag.outputs.tag }}" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download"
+      - if: steps.tag.outputs.exists != 'true'
+        run: |
+          gh release create "${{ steps.tag.outputs.tag }}" dist/GeoLite2-ASN.mmdb dist/GeoLite2-ASN.tgz dist/database dist/SHA256SUMS \
+            --title "${{ steps.tag.outputs.tag }}" --notes-file dist/NOTES.md --latest
+          gh release list --limit 1000 --json tagName --jq '.[30:][].tagName' | xargs -r -n1 gh release delete --yes --cleanup-tag
+      - if: steps.tag.outputs.exists != 'true'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - if: steps.tag.outputs.exists != 'true'
+        id: deployment
+        uses: actions/deploy-pages@v5
